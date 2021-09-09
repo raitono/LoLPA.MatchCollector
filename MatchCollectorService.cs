@@ -57,23 +57,23 @@ namespace LoLPA.MatchCollector
 
         protected override Task ExecuteAsync(CancellationToken cancellationToken)
         {
-            _timer = new Timer(ProcessNextQueueItem, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+            _timer = new Timer(ProcessQueueItems, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
 
             return Task.CompletedTask;
         }
 
-        private async void ProcessNextQueueItem(object state)
+        private async void ProcessQueueItems(object state)
         {
-            ProcessorQueueItem nextQueueItem = null;
+            ProcessorQueueItem queueItem = null;
             try
             {
-                nextQueueItem = await _matchProcessorContext.ProcessorQueue.OrderByDescending(i => i.IsPriority).FirstOrDefaultAsync(i => i.ProcessError == null);
-                if (nextQueueItem != null)
+                queueItem = await _matchProcessorContext.ProcessorQueue.OrderByDescending(i => i.IsPriority).FirstOrDefaultAsync(i => i.ProcessError == null);
+                if (queueItem != null)
                 {
-                    _logger.LogDebug("Processing match {matchId}", nextQueueItem.MatchId);
-                    _matchProcessorContext.Remove(nextQueueItem);
+                    _logger.LogDebug("Processing match {matchId}", queueItem.MatchId);
+                    _matchProcessorContext.Remove(queueItem);
                     await _matchProcessorContext.SaveChangesAsync();
-                    await ProcessMatch(nextQueueItem.MatchId);
+                    await ProcessMatch(queueItem.MatchId);
                 }
                 else
                 {
@@ -83,15 +83,15 @@ namespace LoLPA.MatchCollector
             catch (Exception e)
             {
                 _logger.LogError(e, "Error processing next queue item");
-                if (nextQueueItem != null)
+                if (queueItem != null)
                 {
-                    var isNextQueueItemDeleted = _matchProcessorContext.Entry(nextQueueItem).State == EntityState.Detached;
-                    if (isNextQueueItemDeleted)
+                    var isQueueItemDeleted = _matchProcessorContext.Entry(queueItem).State == EntityState.Detached;
+                    if (isQueueItemDeleted)
                     {
-                        nextQueueItem.Id = default;
-                        _matchProcessorContext.Entry(nextQueueItem).State = EntityState.Added;
+                        queueItem.Id = default;
+                        _matchProcessorContext.Entry(queueItem).State = EntityState.Added;
                     }
-                    nextQueueItem.ProcessError = ProcessError.FromException(e);
+                    queueItem.ProcessError = ProcessError.FromException(e);
                     await _matchProcessorContext.SaveChangesAsync();
                 }
             }
@@ -103,21 +103,21 @@ namespace LoLPA.MatchCollector
 
             foreach (var puuid in match.Metadata.Participants)
             {
-                await AddSummoner(puuid);
+                await UpsertSummoner(puuid);
             }
 
             await _riotContext.SaveChangesAsync();
         }
 
-        private async Task AddSummoner(string puuid)
+        private async Task UpsertSummoner(string puuid)
         {
             var summoner = await _riotContext.Summoners.FindAsync(new object[] { puuid });
             var apiSummoner = await _riotApi.Summoner.GetSummonerByPuuidAsync(RiotSharp.Misc.Region.Na, puuid);
-            var newSummoner = Summoner.FromApi(apiSummoner, summoner);
+            var mappedSummoner = Summoner.FromApi(apiSummoner, summoner);
 
             if (summoner == null)
             {
-                await _riotContext.Summoners.AddAsync(newSummoner);
+                await _riotContext.Summoners.AddAsync(mappedSummoner);
             }
         }
     }
